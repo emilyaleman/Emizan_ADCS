@@ -37,9 +37,13 @@ P = block_diag(np.eye(3)*(0.1**2), np.eye(3)*(1e-4**2))
 # noise parameters
 sigma_st = 2.91e-5
 R_meas = np.eye(3) * (sigma_st**2)
-Q = block_diag(np.eye(3)*(1e-3)**2, np.eye(3)*(1e-5)**2)
-vI = np.array([1, 0, 0])
 
+# updated Q
+sigma_gyro_noise = 1e-2
+sigma_gyro_drift = 1e-3
+Q = block_diag(np.eye(3)*(sigma_gyro_noise**2), np.eye(3)*(sigma_gyro_drift**2))
+
+vI = np.array([1, 0, 0])
 err_deg, sig_deg, t_arr = [], [], []
 np.random.seed(42)
 
@@ -92,7 +96,9 @@ for k in range(steps):
     # error
     q_err = quat_mult(quat_inv(q_true), q_est)
     err_angle = 2 * np.arccos(np.clip(q_err[0], -1.0, 1.0)) * (180/np.pi)
-    sigma_bound = 3 * np.sqrt(np.max(np.diag(P[:3,:3]))) * (180/np.pi)
+
+    total_var = np.trace(P[:3,:3])
+    sigma_bound = 3 * np.sqrt(total_var) * (180/np.pi)
 
     err_deg.append(err_angle)
     sig_deg.append(sigma_bound)
@@ -101,7 +107,7 @@ for k in range(steps):
 # plot
 plt.figure(figsize=(8,4))
 plt.plot(t_arr, err_deg, label="True Attitude Error", color='b')
-plt.plot(t_arr, sig_deg, '--', label="3$\sigma$ Covariance Bound", color='r')
+plt.plot(t_arr, sig_deg, '--', label=r"3$\sigma$ Covariance Bound", color='r')
 plt.title("MEKF Convergence and Consistency")
 plt.xlabel("Time (s)"); plt.ylabel("Error (deg)")
 plt.legend(); plt.grid(True)
