@@ -216,47 +216,6 @@ def compute_3sigma_coverage(result):
     joint_coverage = 100.0 * np.mean(np.all(inside, axis=1))
     return axis_coverage, joint_coverage
 
-result = run_trial(
-    total_time=60.0,
-    gyro_rate_hz=50.0,
-    star_tracker_rate_hz=5.0,
-    initial_error_deg=11.0,
-    P0_att=0.1,
-    P0_bias=0.01,
-    seed=10
-)
-
-time = result["time"]
-err_deg = result["err_deg"]
-sigma3_deg = result["sigma3_deg"]
-
-plt.figure(figsize=(10,6))
-plt.plot(time, err_deg, 'b', linewidth=1.5, label='True Attitude Error')
-plt.plot(time, sigma3_deg[:,0], 'r--', linewidth=1.5, label='3σ Bound')
-plt.grid(True, linestyle='--', alpha=0.5)
-plt.xlabel('Time (s)')
-plt.ylabel('Attitude Error (deg)')
-plt.title('MEKF Convergence and Consistency')
-plt.legend()
-plt.xlim(0, 15)
-plt.ylim(-0.2, 0.2)
-plt.tight_layout()
-plt.savefig('mekf_consistency.png', dpi=300)
-plt.show()
-
-axis_cov, joint_cov = compute_3sigma_coverage(result)
-print(f"3σ coverage axis 1: {axis_cov[0]:.2f}%")
-print(f"3σ coverage axis 2: {axis_cov[1]:.2f}%")
-print(f"3σ coverage axis 3: {axis_cov[2]:.2f}%")
-print(f"3σ coverage all axes simultaneously: {joint_cov:.2f}%")
-
-valid = ~np.isnan(result["static_err_deg"])
-static_rms = np.sqrt(np.mean(result["static_err_deg"][valid]**2))
-mekf_rms = np.sqrt(np.mean(result["err_deg"][valid]**2))
-
-print(f"Static star-tracker-only RMS error: {static_rms:.6f} deg")
-print(f"MEKF RMS error: {mekf_rms:.6f} deg")
-
 def monte_carlo_summary(initial_error_deg, P0_att, n_runs=30):
     conv_times = []
     successes = 0
@@ -271,7 +230,12 @@ def monte_carlo_summary(initial_error_deg, P0_att, n_runs=30):
             P0_bias=0.01,
             seed=1000 + 100*k + int(10*initial_error_deg)
         )
-        tconv = convergence_time(res["err_deg"], dt=1/50.0, threshold_deg=0.01, sustain_sec=1.0)
+        tconv = convergence_time(
+            res["err_deg"],
+            dt=1/50.0,
+            threshold_deg=0.01,
+            sustain_sec=1.0
+        )
         if tconv is not None:
             successes += 1
             conv_times.append(tconv)
@@ -280,70 +244,121 @@ def monte_carlo_summary(initial_error_deg, P0_att, n_runs=30):
         return None, successes / n_runs
     return float(np.median(conv_times)), successes / n_runs
 
-trials = [
-    (5,   0.1),
-    (11,  0.1),
-    (30,  0.1),
-    (60,  0.1),
-    (90,  0.1),
-    (120, 0.1),
-    (11,  0.001),
-    (11,  0.01),
-    (11,  0.1),
-    (11,  1.0),
-]
+def compute_fair_static_vs_mekf_rms(result, settle_time=10.0):
+    time = result["time"]
+    static_err = result["static_err_deg"]
+    mekf_err = result["err_deg"]
 
-rows = []
-for init_err, P0_att in trials:
-    med_t, success_rate = monte_carlo_summary(init_err, P0_att, n_runs=30)
-    rows.append([
-        f"{init_err}°",
-        f"{P0_att}",
-        ">20 s" if med_t is None else f"{med_t:.2f} s",
-        f"{100*success_rate:.0f}%"
+    mask = (~np.isnan(static_err)) & (time >= settle_time)
+
+    static_rms = np.sqrt(np.mean(static_err[mask]**2))
+    mekf_rms = np.sqrt(np.mean(mekf_err[mask]**2))
+
+    return static_rms, mekf_rms
+
+if __name__ == "__main__":
+    result = run_trial(
+        total_time=60.0,
+        gyro_rate_hz=50.0,
+        star_tracker_rate_hz=5.0,
+        initial_error_deg=11.0,
+        P0_att=0.1,
+        P0_bias=0.01,
+        seed=10
+    )
+
+    time = result["time"]
+    err_deg = result["err_deg"]
+    sigma3_deg = result["sigma3_deg"]
+
+    plt.figure(figsize=(10,6))
+    plt.plot(time, err_deg, 'b', linewidth=1.5, label='True Attitude Error')
+    plt.plot(time, sigma3_deg[:,0], 'r--', linewidth=1.5, label='3σ Bound')
+    plt.grid(True, linestyle='--', alpha=0.5)
+    plt.xlabel('Time (s)')
+    plt.ylabel('Attitude Error (deg)')
+    plt.title('MEKF Convergence and Consistency')
+    plt.legend()
+    plt.xlim(0, 15)
+    plt.ylim(-0.2, 0.2)
+    plt.tight_layout()
+    plt.savefig('mekf_consistency.png', dpi=300)
+    plt.show()
+
+    axis_cov, joint_cov = compute_3sigma_coverage(result)
+    print(f"3σ coverage axis 1: {axis_cov[0]:.2f}%")
+    print(f"3σ coverage axis 2: {axis_cov[1]:.2f}%")
+    print(f"3σ coverage axis 3: {axis_cov[2]:.2f}%")
+    print(f"3σ coverage all axes simultaneously: {joint_cov:.2f}%")
+
+    static_rms, mekf_rms = compute_fair_static_vs_mekf_rms(result, settle_time=10.0)
+    print(f"Static star-tracker-only RMS error after 10 s: {static_rms:.6f} deg")
+    print(f"MEKF RMS error after 10 s: {mekf_rms:.6f} deg")
+
+    trials = [
+        (5,   0.1),
+        (11,  0.1),
+        (30,  0.1),
+        (60,  0.1),
+        (90,  0.1),
+        (120, 0.1),
+        (11,  0.001),
+        (11,  0.01),
+        (11,  0.1),
+        (11,  1.0),
+    ]
+
+    rows = []
+    for init_err, P0_att in trials:
+        med_t, success_rate = monte_carlo_summary(init_err, P0_att, n_runs=30)
+        rows.append([
+            f"{init_err}°",
+            f"{P0_att}",
+            ">20 s" if med_t is None else f"{med_t:.2f} s",
+            f"{100*success_rate:.0f}%"
+        ])
+
+    df = pd.DataFrame(rows, columns=[
+        "Initial Error",
+        "P₀ (rad²)",
+        "Median Conv. Time",
+        "Success Rate"
     ])
 
-df = pd.DataFrame(rows, columns=[
-    "Initial Error",
-    "P₀ (rad²)",
-    "Median Conv. Time",
-    "Success Rate"
-])
+    print(df)
 
-print(df)
+    fig, ax = plt.subplots(figsize=(10,6))
+    ax.axis('off')
+    ax.set_title(
+        'MEKF Convergence Behavior for Varying Initial Conditions\n'
+        '(Convergence: error < 0.01° sustained for 1 s)',
+        fontsize=13,
+        fontweight='bold',
+        pad=20
+    )
 
-fig, ax = plt.subplots(figsize=(10,6))
-ax.axis('off')
-ax.set_title(
-    'MEKF Convergence Behavior for Varying Initial Conditions\n'
-    '(Convergence: error < 0.01° sustained for 1 s)',
-    fontsize=13,
-    fontweight='bold',
-    pad=20
-)
+    table = ax.table(
+        cellText=df.values,
+        colLabels=df.columns,
+        cellLoc='center',
+        loc='center',
+        colWidths=[0.20, 0.18, 0.28, 0.20]
+    )
 
-table = ax.table(
-    cellText=df.values,
-    colLabels=df.columns,
-    cellLoc='center',
-    loc='center',
-    colWidths=[0.20, 0.18, 0.28, 0.20]
-)
+    table.auto_set_font_size(False)
+    table.set_fontsize(11)
+    table.scale(1.0, 1.8)
 
-table.auto_set_font_size(False)
-table.set_fontsize(11)
-table.scale(1.0, 1.8)
-
-for j in range(len(df.columns)):
-    table[0, j].set_facecolor('#2c3e50')
-    table[0, j].set_text_props(color='white', fontweight='bold')
-
-for i in range(1, len(df) + 1):
-    success_val = int(df.iloc[i-1, 3].replace('%', ''))
-    color = '#d5f5e3' if success_val == 100 else '#fadbd8'
     for j in range(len(df.columns)):
-        table[i, j].set_facecolor(color)
+        table[0, j].set_facecolor('#2c3e50')
+        table[0, j].set_text_props(color='white', fontweight='bold')
 
-plt.tight_layout()
-plt.savefig('mekf_convergence_table.png', dpi=300, bbox_inches='tight')
-plt.show()
+    for i in range(1, len(df) + 1):
+        success_val = int(df.iloc[i-1, 3].replace('%', ''))
+        color = '#d5f5e3' if success_val == 100 else '#fadbd8'
+        for j in range(len(df.columns)):
+            table[i, j].set_facecolor(color)
+
+    plt.tight_layout()
+    plt.savefig('mekf_convergence_table.png', dpi=300, bbox_inches='tight')
+    plt.show()
